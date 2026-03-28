@@ -1,0 +1,14 @@
+[edge_runtime]
+enabled = true
+
+[functions.ai-chat]
+verify_jwt = false
+
+[functions.ai-insights]
+verify_jwt = false
+
+[functions.ai-forecast]
+verify_jwt = false
+
+[functions.ai-progress]
+verify_jwt = false
