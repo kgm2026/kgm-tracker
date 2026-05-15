@@ -1,4 +1,4 @@
-const CACHE_TTL_MS = 3000;
+const CACHE_TTL_MS = 60000; // 1 minute — balances freshness with reduced re-fetching
 export const cache = new Map();
 
 // Tracks tables that were invalidated while no component listener was mounted.

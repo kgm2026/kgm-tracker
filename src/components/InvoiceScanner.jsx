@@ -62,8 +62,7 @@ export default function InvoiceScanner({ onExtracted }) {
     reader.readAsDataURL(file);
   };
 
-  const useItem = (item, index) => {
-    onExtracted({
+  const buildExtractedItem = (item) => ({
       date: item.date || results?.date || '',
       material: item.material || '',
       supplier: item.supplier || results?.supplier || '',
@@ -75,6 +74,9 @@ export default function InvoiceScanner({ onExtracted }) {
       status: 'Unpaid',
       notes: results?.invoiceNumber ? `Invoice #${results.invoiceNumber}` : '',
     });
+
+  const applyItem = (item, index) => {
+    onExtracted(buildExtractedItem(item));
     // Remove the used item
     setResults(prev => ({
       ...prev,
@@ -83,7 +85,9 @@ export default function InvoiceScanner({ onExtracted }) {
   };
 
   const useAll = () => {
-    (results?.items || []).forEach((item, i) => useItem(item, i));
+    const extractedItems = (results?.items || []).map(buildExtractedItem);
+    if (extractedItems.length === 0) return;
+    onExtracted(extractedItems);
     setResults(null);
     setPreview(null);
   };
@@ -173,7 +177,7 @@ export default function InvoiceScanner({ onExtracted }) {
                         <strong style={{ color: T.financial }}>PKR {(item.total || 0).toLocaleString()}</strong>
                       </div>
                     </div>
-                    <button onClick={() => useItem(item, i)} style={{
+                    <button onClick={() => applyItem(item, i)} style={{
                       ...S.btnGold, fontSize: 10, padding: '6px 14px', marginLeft: 12,
                     }}>
                       Use

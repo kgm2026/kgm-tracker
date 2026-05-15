@@ -10,7 +10,6 @@ export default function Dashboard({ selectedProject, onNavigate }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
@@ -25,15 +24,15 @@ export default function Dashboard({ selectedProject, onNavigate }) {
 
       const matTotal = materials.reduce((s, m) => s + (Number(m.total) || 0), 0);
       const contractorPayments = payments.filter(p => !p.payment_type || p.payment_type === "contractor");
-      const supplierPayments = payments.filter(p => p.payment_type === "supplier");
       const totalContractorPayments = contractorPayments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
-      const totalSupplierPayments = supplierPayments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
       const totalBudget = projects.reduce((s, p) => s + (Number(p.budget) || 0), 0);
       const totalUnpaid = materials.reduce((s, m) => s + (Number(m.unpaid) || 0), 0);
-      const totalSpent = matTotal + totalContractorPayments + totalSupplierPayments;
+      // matTotal already includes all material costs; supplier payments only reduce
+      // unpaid balances, they don't create new spend — so don't add them here.
+      const totalSpent = matTotal + totalContractorPayments;
       const budgetRemaining = totalBudget - totalSpent;
 
-      const paidCount = materials.filter(m => m.status === "Paid").length;
+      const paidCount = materials.filter(m => (m.status || "").toLowerCase() === "paid").length;
       const progress = materials.length > 0 ? Math.round((paidCount / materials.length) * 100) : 0;
 
       // Prepare Chart Data (Cumulative Spend over time)

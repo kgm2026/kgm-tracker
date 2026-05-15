@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { dbGet, dbInsert, dbPatch, dbDelete, setAuthToken } from './api';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { AUTH_REQUIRED_MESSAGE, dbGet, dbInsert, dbPatch, dbDelete, setAuthToken } from './api';
 import { cache } from './cache';
 
 // Mock fetch globally
@@ -17,7 +17,7 @@ function jsonResponse(data, status = 200) {
 beforeEach(() => {
   mockFetch.mockReset();
   cache.clear();
-  setAuthToken(null);
+  setAuthToken('test-jwt');
 });
 
 describe('dbGet', () => {
@@ -55,6 +55,15 @@ describe('dbGet', () => {
 
     const result = await dbGet('projects');
     expect(result).toEqual([]);
+  });
+
+  it('returns empty array and skips fetch when auth is missing', async () => {
+    setAuthToken(null);
+
+    const result = await dbGet('projects');
+
+    expect(result).toEqual([]);
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it('appends filters to query string', async () => {
@@ -202,16 +211,9 @@ describe('setAuthToken', () => {
     expect(opts.headers.Authorization).toBe('Bearer my-jwt');
   });
 
-  it('falls back to anon when token is null', async () => {
-    mockFetch.mockReturnValue(jsonResponse([]));
-
+  it('returns the current auth-required message when token is missing', () => {
     setAuthToken(null);
-    await dbGet('projects');
-
-    const [, opts] = mockFetch.mock.calls[0];
-    // Should use SKEY (anon) as fallback — just verify it's not 'Bearer null'
-    expect(opts.headers.Authorization).not.toBe('Bearer null');
-    expect(opts.headers.Authorization).toMatch(/^Bearer /);
+    expect(AUTH_REQUIRED_MESSAGE).toMatch(/log in/i);
   });
 
   it('clears cache on auth change', async () => {

@@ -60,30 +60,12 @@ export default function TimelineEstimation({ projectId, projectName }) {
       const finishingTotal = materials.filter(m => m.category === 'finishing').reduce((s, m) => s + (m.total || 0), 0);
       const totalSpent = greyTotal + finishingTotal;
 
-      // Progress from AI photo analysis
-      const progressSummary = progressEntries.slice(0, 5).map(p => {
-        let analysis = null;
-        try { analysis = p.ai_analysis ? JSON.parse(p.ai_analysis) : null; } catch {}
-        return {
-          title: p.title, date: p.created_at?.slice(0, 10),
-          phase: p.phase || analysis?.phase,
-          progressPct: analysis?.progressPct,
-          quality: analysis?.quality,
-          summary: analysis?.summary?.slice(0, 200),
-        };
-      });
-
-      const contractorSummary = contractors.map(c => ({
-        name: c.name, trade: c.trade, workStatus: c.work_status,
-        contractValue: c.contract_value, amountPaid: c.amount_paid,
-      }));
-
       // Keep data compact
       const months = Object.entries(byMonth).slice(-6).map(([m, t]) => `${m}:${t}`).join(',');
       const contShort = contractors.slice(0, 5).map(c => `${c.name}(${c.trade}):${c.work_status}`).join(';');
       const progShort = progressEntries.slice(0, 3).map(p => {
         let a = null;
-        try { a = p.ai_analysis ? JSON.parse(p.ai_analysis) : null; } catch {}
+        try { a = p.ai_analysis ? JSON.parse(p.ai_analysis) : null; } catch { a = null; }
         return `${p.title || ''}:${a?.progressPct || '?'}%`;
       }).join(';');
 

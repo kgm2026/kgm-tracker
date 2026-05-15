@@ -1,20 +1,22 @@
-import { SURL } from './api';
+import { AUTH_REQUIRED_MESSAGE } from './api';
+import { supabase } from './supabaseClient';
 
-const EDGE_BASE = `${SURL}/functions/v1`;
 const MAX_RETRIES = 3;
 const MAX_CHAT_MESSAGES = 10;
 
 async function callEdgeFunction(name, body, { retries = MAX_RETRIES, onRetry } = {}) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.access_token) throw new Error(AUTH_REQUIRED_MESSAGE);
+
   let lastError;
   for (let attempt = 0; attempt < retries; attempt++) {
     try {
-      const res = await fetch(`${EDGE_BASE}/${name}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+      const { data, error } = await supabase.functions.invoke(name, {
+        body,
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || `AI request failed (${res.status})`);
+      if (error) {
+        throw new Error(await getFunctionErrorMessage(error));
+      }
       return data;
     } catch (err) {
       lastError = err;
@@ -26,6 +28,28 @@ async function callEdgeFunction(name, body, { retries = MAX_RETRIES, onRetry } =
     }
   }
   throw lastError;
+}
+
+async function getFunctionErrorMessage(error) {
+  if (error?.context) {
+    try {
+      const payload = await error.context.clone().json();
+      if (payload?.error) return payload.error;
+    } catch (parseErr) {
+      // Non-JSON error body; we'll try plain text next.
+      void parseErr;
+    }
+
+    try {
+      const text = await error.context.clone().text();
+      if (text) return text;
+    } catch (textErr) {
+      // Ignore unreadable response body and fallback to generic message.
+      void textErr;
+    }
+  }
+
+  return error?.message || 'AI request failed';
 }
 
 export async function sendChatMessage(messages, projectData, { onRetry } = {}) {

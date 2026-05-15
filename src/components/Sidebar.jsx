@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useTheme } from '../context/ThemeContext';
+import kgmLogo from '../assets/kgm-homes-logo.jpeg';
 
 const SIDEBAR_EXPANDED = 256;
 const SIDEBAR_COLLAPSED = 64;
@@ -12,6 +13,7 @@ const TABS = [
   { id: "payments", label: "Payment Log", icon: "payments" },
   { id: "suppliers", label: "Supplier Balances", icon: "account_balance_wallet" },
   { id: "budget", label: "Budget vs Actual", icon: "analytics" },
+  { id: "boq", label: "BOQ", icon: "table_chart" },
   { id: "ledgers", label: "Ledgers", icon: "menu_book" },
   { id: "aiinsights", label: "AI Insights", icon: "psychology" },
 
@@ -34,7 +36,8 @@ export default function Sidebar({ tab, setTab }) {
   const newEntryRef = useRef(null);
 
   const expanded = !collapsed || hovered;
-  const width = expanded ? SIDEBAR_EXPANDED : SIDEBAR_COLLAPSED;
+  const railWidth = collapsed ? SIDEBAR_COLLAPSED : SIDEBAR_EXPANDED;
+  const panelWidth = collapsed && hovered ? SIDEBAR_EXPANDED : railWidth;
 
   useEffect(() => {
     const handler = (e) => {
@@ -44,25 +47,31 @@ export default function Sidebar({ tab, setTab }) {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
+  useEffect(() => {
+    document.documentElement.style.setProperty("--kgm-sidebar-width", `${railWidth}px`);
+    return () => document.documentElement.style.removeProperty("--kgm-sidebar-width");
+  }, [railWidth]);
+
   return (
     <aside
       onMouseEnter={() => { if (collapsed) setHovered(true); }}
       onMouseLeave={() => setHovered(false)}
       style={{
         display: "flex", flexDirection: "column", position: "fixed",
-        left: 0, top: 0, width, height: "100vh",
+        left: 0, top: 0, width: panelWidth, height: "100vh",
         background: T.sidebarBg, borderRight: `1px solid ${T.sidebarBorder}`,
         zIndex: 50, fontFamily: "'Inter',sans-serif", fontSize: 11,
         letterSpacing: 2, textTransform: "uppercase",
-        transition: "width 0.2s ease", overflow: "hidden",
+        transition: "width 0.2s ease, box-shadow 0.2s ease", overflow: "hidden",
+        boxShadow: collapsed && hovered ? "0 12px 48px rgba(15, 23, 42, 0.28)" : "none",
       }}
-      data-sidebar-width={width}
+      data-sidebar-width={railWidth}
     >
       {/* Logo + Collapse Toggle */}
       <div style={{ padding: expanded ? "24px 24px" : "24px 12px 12px", borderBottom: `1px solid ${T.sidebarBorder}`, display: "flex", flexDirection: "column", alignItems: expanded ? "flex-start" : "center", gap: 12 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, width: "100%" }}>
-          <div style={{ width: 32, height: 32, minWidth: 32, border: `1px solid ${T.text}`, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 16, color: T.text }}>K</div>
-          {expanded && <h1 style={{ fontWeight: 300, letterSpacing: "0.3em", color: T.text, fontSize: 12, margin: 0, whiteSpace: "nowrap" }}>KGM CONSTRUCTIONS</h1>}
+          <img src={kgmLogo} alt="KGM Homes logo" style={{ width: 36, height: 36, minWidth: 36, objectFit: "cover", border: `1px solid ${T.sidebarBorder}` }} />
+          {expanded && <h1 style={{ fontWeight: 300, letterSpacing: "0.3em", color: T.text, fontSize: 12, margin: 0, whiteSpace: "nowrap" }}>KGM HOMES</h1>}
         </div>
         {expanded && <p style={{ color: T.navInactiveText, fontSize: 9, letterSpacing: "0.2em", margin: 0 }}>Project Tracker v1.0</p>}
         <button onClick={() => setCollapsed(o => !o)} style={{ background: "none", border: "none", cursor: "pointer", color: T.navInactiveText, padding: 0, width: expanded ? "auto" : 32, display: "flex", alignItems: "center", justifyContent: "center" }} title={collapsed ? "Expand sidebar" : "Collapse sidebar"}>
@@ -95,7 +104,7 @@ export default function Sidebar({ tab, setTab }) {
         {showNewEntry && expanded && (
           <div style={{ position: "absolute", bottom: "100%", left: 0, right: 0, background: T.card, border: `1px solid ${T.cardBorder}`, marginBottom: 4, zIndex: 10 }}>
             {NEW_ENTRY_OPTIONS.map(opt => (
-              <button key={opt.id} onClick={() => { setShowNewEntry(false); setTab(opt.id); }} style={{
+              <button key={opt.id} onClick={() => { setShowNewEntry(false); setTab(opt.id); window.dispatchEvent(new CustomEvent("kgm-open-new-entry", { detail: { tab: opt.id } })); }} style={{
                 display: "flex", alignItems: "center", gap: 12, width: "100%",
                 padding: "12px 24px", background: "none", border: "none",
                 color: T.text, cursor: "pointer", fontFamily: "'Inter',sans-serif",
@@ -125,22 +134,6 @@ export default function Sidebar({ tab, setTab }) {
             display: "flex", alignItems: "center", justifyContent: "center",
           }} title="New Entry">+</button>
         )}
-        <div style={{ marginTop: expanded ? 20 : 12, display: "flex", flexDirection: "column", gap: expanded ? 16 : 12, alignItems: expanded ? "stretch" : "center" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: expanded ? 16 : 0, color: T.navInactiveText, cursor: "pointer", transition: "color 0.15s", justifyContent: expanded ? "flex-start" : "center" }}
-            onMouseEnter={e => e.currentTarget.style.color = T.text}
-            onMouseLeave={e => e.currentTarget.style.color = T.navInactiveText}
-            title={!expanded ? "Settings" : undefined}>
-            <span className="material-symbols-outlined" style={{ fontSize: 18 }}>settings</span>
-            {expanded && <span>Settings</span>}
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: expanded ? 16 : 0, color: T.navInactiveText, cursor: "pointer", transition: "color 0.15s", justifyContent: expanded ? "flex-start" : "center" }}
-            onMouseEnter={e => e.currentTarget.style.color = T.text}
-            onMouseLeave={e => e.currentTarget.style.color = T.navInactiveText}
-            title={!expanded ? "Support" : undefined}>
-            <span className="material-symbols-outlined" style={{ fontSize: 18 }}>help_outline</span>
-            {expanded && <span>Support</span>}
-          </div>
-        </div>
       </div>
     </aside>
   );

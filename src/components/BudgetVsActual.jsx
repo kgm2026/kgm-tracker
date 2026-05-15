@@ -70,21 +70,26 @@ export default function BudgetVsActual({ projectId }) {
   }, [fetchData]);
 
   const matActual = useMemo(() => {
-    const result = { grey: 0, finishing: 0 };
-    materials.forEach(m => { if (m.category === "grey") result.grey += m.total || 0; else result.finishing += m.total || 0; });
+    const result = { grey: 0, finishing: 0, misc: 0 };
+    materials.forEach(m => {
+      if (m.category === "grey") result.grey += m.total || 0;
+      else if (m.category === "misc") result.misc += m.total || 0;
+      else result.finishing += m.total || 0;
+    });
     return result;
   }, [materials]);
 
   const contractorActual = useMemo(() => contractors.reduce((s, c) => s + (c.amount_paid || 0), 0), [contractors]);
-  const totalSpent = matActual.grey + matActual.finishing + contractorActual;
+  const totalSpent = matActual.grey + matActual.finishing + matActual.misc + contractorActual;
   const totalPct = totalBudget ? Math.round((totalSpent / totalBudget) * 100) : 0;
-  const variance = totalBudget - totalSpent;
+  const variance = totalSpent - totalBudget;
   const remaining = totalBudget - totalSpent;
 
   const getActual = (key) => {
     if (key === "grey") return matActual.grey;
     if (key === "finishing") return matActual.finishing;
     if (key === "contractors") return contractorActual;
+    if (key === "misc") return matActual.misc;
     return 0;
   };
 
@@ -150,7 +155,7 @@ export default function BudgetVsActual({ projectId }) {
         {[
           { label: "Total Budgeted", value: fmt(totalBudget), sub: "Allocated Funds", color: D.white },
           { label: "Actual Spent", value: fmt(totalSpent), sub: `${totalPct}% Utilized`, color: D.gold },
-          { label: "Variance", value: `${variance >= 0 ? "+" : ""}${fmt(variance)}`, sub: variance >= 0 ? "Positive Performance" : "Over Budget", color: variance >= 0 ? D.green : D.error },
+          { label: "Variance", value: `${variance >= 0 ? "+" : ""}${fmt(variance)}`, sub: variance <= 0 ? "Under Budget" : "Over Budget", color: variance <= 0 ? D.green : D.error },
           { label: "Remaining Funds", value: fmt(remaining), sub: "Contingency Incl.", color: D.white },
         ].map((k, i) => (
           <div key={i} style={{ background: D.surfaceLow, border: `1px solid ${D.outline}`, padding: 24 }}>

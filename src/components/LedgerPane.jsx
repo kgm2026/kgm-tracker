@@ -5,7 +5,7 @@ export function LedgerPane({ selected, T, D, getContractorLedger, getSupplierLed
     return (
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", padding: 80 }}>
         <div style={{ textAlign: "center" }}>
-          <div style={{ fontSize: 40, marginBottom: 16, color: D.outline, opacity: 0.5 }}></div>
+          <span className="material-symbols-outlined" style={{ fontSize: 40, marginBottom: 16, color: D.outline, opacity: 0.5, display: "block" }}>menu_book</span>
           <div style={{ fontFamily: "'Inter',sans-serif", fontSize: 13, color: D.muted }}>Select a ledger from the list</div>
         </div>
       </div>
@@ -41,7 +41,7 @@ export function LedgerPane({ selected, T, D, getContractorLedger, getSupplierLed
               ))}
             </tr></thead>
             <tbody>
-              {cPays.map((p, i) => (
+              {cPays.map((p) => (
                 <tr key={p.id} style={{ borderBottom: `1px solid ${D.outline}`, transition: "background 0.15s", background: T.card }}
                   onMouseEnter={e => e.currentTarget.style.background = T.tableBg2}
                   onMouseLeave={e => e.currentTarget.style.background = T.card}>
@@ -94,7 +94,7 @@ export function LedgerPane({ selected, T, D, getContractorLedger, getSupplierLed
             ))}
           </tr></thead>
           <tbody>
-            {sp.map((p, i) => (
+            {sp.map((p) => (
               <tr key={p.id} style={{ borderBottom: `1px solid ${D.outline}`, transition: "background 0.15s", background: T.card }}
                 onMouseEnter={e => e.currentTarget.style.background = T.tableBg2}
                 onMouseLeave={e => e.currentTarget.style.background = T.card}>
@@ -123,7 +123,7 @@ export function LedgerPane({ selected, T, D, getContractorLedger, getSupplierLed
                 ))}
               </tr></thead>
               <tbody>
-                {sy.map((p, i) => (
+                {sy.map((p) => (
                   <tr key={p.id} style={{ borderBottom: `1px solid ${D.outline}`, transition: "background 0.15s", background: T.card }}
                     onMouseEnter={e => e.currentTarget.style.background = T.tableBg2}
                     onMouseLeave={e => e.currentTarget.style.background = T.card}>

@@ -21,13 +21,12 @@ export default function GlobalStyles() {
       input[type=date]::-webkit-calendar-picker-indicator { filter: ${theme === "dark" ? "invert(0.5)" : "none"}; }
       select option { background: ${T.card}; color: ${T.text}; }
 
-      button { transition: all 0.15s ease; border-radius: 0 !important; }
+      button { transition: all 0.15s ease; }
       button:hover { filter: brightness(${theme === "dark" ? "1.12" : "0.92"}); }
       button:active { filter: brightness(${theme === "dark" ? "0.9" : "0.85"}); }
 
       input, select, textarea {
         transition: border-color 0.2s ease, box-shadow 0.2s ease !important;
-        border-radius: 0 !important;
       }
       input:focus, select:focus, textarea:focus {
         border-color: ${T.text} !important;
@@ -48,15 +47,19 @@ export default function GlobalStyles() {
         border-radius: 0;
       }
 
-      * { border-radius: 0 !important; }
-
       @media print { .no-print { display: none !important; } body { background: white; } * { color: black !important; background: white !important; border-color: #ccc !important; box-shadow: none !important; } }
       @media (max-width: 1023px) {
         aside[style] { display: none !important; }
-        .kgm-main { margin-left: 0 !important; }
+        .kgm-main { margin-left: 0 !important; padding-bottom: calc(84px + env(safe-area-inset-bottom)); }
         .kgm-mobile-nav { display: flex !important; }
       }
       @media (max-width: 640px) {
+        .kgm-header { padding: 14px 14px !important; height: auto !important; min-height: 76px; align-items: flex-start !important; gap: 12px; }
+        .kgm-header-main { width: 100%; min-width: 0; gap: 14px !important; align-items: flex-start !important; flex-wrap: wrap; }
+        .kgm-project-trigger { min-width: 0; max-width: 100%; }
+        .kgm-project-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .kgm-project-address { display: none; }
+        .kgm-user-email { display: none; }
         .kgm-header-actions { width: 100%; flex-wrap: wrap; }
         .kgm-body { padding: 14px 12px !important; }
         .kgm-ledger-layout { flex-direction: column !important; }

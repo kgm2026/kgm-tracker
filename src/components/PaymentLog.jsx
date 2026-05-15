@@ -14,6 +14,8 @@ const BLANK_P = {
   supplier_name: "", amount: "", method: "Cash", reference: "", remarks: ""
 };
 
+const excessPaymentNote = (paymentId) => `Auto-added supplier overpayment from payment_log:${paymentId}`;
+
 export default function PaymentLog({ projectId }) {
   const { S, T } = useTheme();
   const { isAdmin } = useAuth();
@@ -63,6 +65,17 @@ export default function PaymentLog({ projectId }) {
     return () => window.removeEventListener("kgm-db-changed", handler);
   }, [fetchData]);
 
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.detail?.tab === "payments") {
+        setForm(BLANK_P);
+        setModal(true);
+      }
+    };
+    window.addEventListener("kgm-open-new-entry", handler);
+    return () => window.removeEventListener("kgm-open-new-entry", handler);
+  }, []);
+
   const save = async () => {
     if (!form.date || !form.amount) return notify("Date and amount required", "error");
     if (form.payment_type === "supplier" && !form.supplier_name.trim()) return notify("Supplier name required", "error");
@@ -101,13 +114,33 @@ export default function PaymentLog({ projectId }) {
           }
         }
         await Promise.all(updates.map(u => dbPatch("material_purchases", u.id, u.data)));
-        if (remaining > 0) notify(`PKR ${remaining.toLocaleString()} exceeds total unpaid for ${form.supplier_name} — all entries marked Paid.`);
+        if (remaining > 0) {
+          const latestMaterialRows = await dbGet("material_purchases", `&project_id=eq.${projectId}&order=num.desc&limit=1`);
+          const nextMaterialNum = latestMaterialRows.length > 0 ? (latestMaterialRows[0].num || 0) + 1 : 1;
+          await dbInsert("material_purchases", {
+            num: nextMaterialNum,
+            date: form.date,
+            material: "Supplier overpayment / advance",
+            category: "misc",
+            supplier: form.supplier_name,
+            qty: 1,
+            unit: "adjustment",
+            rate: remaining,
+            total: remaining,
+            unpaid: 0,
+            status: "Paid",
+            notes: excessPaymentNote(row.id),
+            project_id: projectId,
+          });
+          notify(`PKR ${remaining.toLocaleString()} exceeds total unpaid for ${form.supplier_name} and was added to project cost.`);
+        }
       } else if (form.payment_type === "contractor" && form.contractor_id) {
         const c = contractors.find(x => x.contractor_id === form.contractor_id);
         if (c) {
           const newPaid = (c.amount_paid || 0) + toInt(form.amount, 0);
           const newDue = Math.max(0, (c.contract_value || 0) - newPaid);
-          await dbPatch("contractors", c.id, { amount_paid: newPaid, amount_due: newDue });
+          const newStatus = newDue <= 0 ? "Paid" : newPaid > 0 ? "Partial" : "Unpaid";
+          await dbPatch("contractors", c.id, { amount_paid: newPaid, amount_due: newDue, payment_status: newStatus });
         }
       }
       setModal(false);
@@ -115,6 +148,8 @@ export default function PaymentLog({ projectId }) {
       notify("Payment logged");
       if (form.payment_type === "supplier") {
         invalidateTable("material_purchases");
+      } else if (form.payment_type === "contractor") {
+        invalidateTable("contractors");
       }
       invalidateTable("payment_log");
       emitDataChange();
@@ -124,7 +159,53 @@ export default function PaymentLog({ projectId }) {
 
   const del = async (l) => {
     setLogs(prev => prev.filter(x => x.id !== l.id));
-    const timeout = setTimeout(async () => { await dbDelete("payment_log", l.id); }, 4000);
+    const timeout = setTimeout(async () => {
+      try {
+        await dbDelete("payment_log", l.id);
+        // Reverse auto-balanced side-effects
+        if (l.payment_type === "supplier" && l.supplier_name) {
+          const supplierLower = l.supplier_name.trim().toLowerCase();
+          const allEntries = await dbGet("material_purchases", `&project_id=eq.${projectId}&order=num.asc`);
+          const excessEntries = allEntries.filter(e => e.notes === excessPaymentNote(l.id));
+          const excessTotal = excessEntries.reduce((sum, e) => sum + (Number(e.total) || 0), 0);
+          if (excessEntries.length > 0) {
+            await Promise.all(excessEntries.map(e => dbDelete("material_purchases", e.id)));
+          }
+          const supplierEntries = allEntries.filter(e => (e.supplier || "").trim().toLowerCase() === supplierLower && e.notes !== excessPaymentNote(l.id));
+          let remaining = Math.max(0, (l.amount || 0) - excessTotal);
+          const updates = [];
+          // Walk entries in reverse order (newest first) to undo the FIFO application
+          for (const entry of [...supplierEntries].reverse()) {
+            if (remaining <= 0) break;
+            const currentUnpaid = entry.unpaid || 0;
+            const originalTotal = entry.total || 0;
+            const maxRestore = originalTotal - currentUnpaid;
+            if (maxRestore <= 0) continue;
+            const restore = Math.min(remaining, maxRestore);
+            const newUnpaid = currentUnpaid + restore;
+            const newStatus = newUnpaid >= originalTotal ? "Unpaid" : newUnpaid > 0 ? "Partial" : "Paid";
+            updates.push({ id: entry.id, data: { unpaid: newUnpaid, status: newStatus } });
+            remaining -= restore;
+          }
+          if (updates.length > 0) {
+            await Promise.all(updates.map(u => dbPatch("material_purchases", u.id, u.data)));
+            invalidateTable("material_purchases");
+          }
+        } else if (l.payment_type === "contractor" && l.contractor_id) {
+          const c = contractors.find(x => x.contractor_id === l.contractor_id);
+          if (c) {
+            const newPaid = Math.max(0, (c.amount_paid || 0) - (l.amount || 0));
+            const newDue = Math.max(0, (c.contract_value || 0) - newPaid);
+            const newStatus = newDue <= 0 ? "Paid" : newPaid > 0 ? "Partial" : "Unpaid";
+            await dbPatch("contractors", c.id, { amount_paid: newPaid, amount_due: newDue, payment_status: newStatus });
+            invalidateTable("contractors");
+          }
+        }
+      } catch (err) {
+        setLogs(prev => [...prev, l].sort((a, b) => (a.num || 0) - (b.num || 0)));
+        notify(`Failed to delete payment: ${err.message}`, "error");
+      }
+    }, 4000);
     const onUndo = () => {
       clearTimeout(timeout);
       setLogs(prev => [...prev, l].sort((a, b) => (a.num || 0) - (b.num || 0)));
@@ -140,8 +221,6 @@ export default function PaymentLog({ projectId }) {
   });
 
   const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);
-
-  useEffect(() => { setPage(1); }, [search]);
 
   const D = {
     surface: T.card, surfaceLow: T.card, surfaceLowest: T.card,
@@ -176,7 +255,7 @@ export default function PaymentLog({ projectId }) {
         <div style={{ display: "flex", alignItems: "center", gap: 32 }}>
           <div style={{ display: "flex", alignItems: "center", borderBottom: `1px solid ${D.outline}`, paddingBottom: 4 }}>
             <span style={{ fontSize: 16, color: D.muted, marginRight: 8 }}>🔍</span>
-            <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search transactions..." style={{ background: "transparent", border: "none", color: T.text, padding: "4px 0", fontSize: 13, fontFamily: "'Inter',sans-serif", outline: "none", width: 260 }} />
+            <input type="text" value={search} onChange={e => { setSearch(e.target.value); setPage(1); }} placeholder="Search transactions..." style={{ background: "transparent", border: "none", color: T.text, padding: "4px 0", fontSize: 13, fontFamily: "'Inter',sans-serif", outline: "none", width: 260 }} />
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>

@@ -32,7 +32,7 @@ export default function ImportCsvModal({ S, D, projectId, entries, onImported })
       const matIdx = headers.findIndex(h => h === "material");
       if (dateIdx === -1 || matIdx === -1) { notify("CSV must have 'Date' and 'Material' columns", "error"); return; }
       const findIdx = (name) => headers.findIndex(h => h === name);
-      const catIdx = findIdx("category"), supIdx = findIdx("supplier"), qtyIdx = findIdx("qty"), unitIdx = findIdx("unit"), rateIdx = findIdx("rate"), totalIdx = findIdx("total"), unpaidIdx = findIdx("unpaid"), statusIdx = findIdx("status"), notesIdx = findIdx("notes");
+      const catIdx = findIdx("category"), supIdx = findIdx("supplier"), qtyIdx = findIdx("qty"), rateIdx = findIdx("rate"), totalIdx = findIdx("total"), unpaidIdx = findIdx("unpaid"), statusIdx = findIdx("status"), notesIdx = findIdx("notes");
       const rows = [];
       let nextNum = entries.length > 0 ? Math.max(...entries.map(e => e.num || 0)) + 1 : 1;
       for (let i = 1; i < lines.length; i++) {
@@ -63,7 +63,13 @@ export default function ImportCsvModal({ S, D, projectId, entries, onImported })
     if (!importPreview) return;
     setImporting(true);
     try {
-      const results = await Promise.all(importPreview.map(r => dbInsert("material_purchases", r)));
+      const results = [];
+      const BATCH = 10;
+      for (let i = 0; i < importPreview.length; i += BATCH) {
+        const batch = importPreview.slice(i, i + BATCH);
+        const batchResults = await Promise.all(batch.map(r => dbInsert("material_purchases", r)));
+        results.push(...batchResults);
+      }
       onImported(results);
       notify(`${results.length} entries imported`);
       setImportPreview(null);

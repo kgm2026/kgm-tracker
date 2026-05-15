@@ -120,7 +120,7 @@ export default function AIChat({ projectId, projectName }) {
       });
       setRetryInfo('');
       const { reply } = await sendChatMessage(apiMessages, projectData, {
-        onRetry: (attempt, max, delay) => setRetryInfo(`Retrying (${attempt}/${max})...`),
+        onRetry: (attempt, max) => setRetryInfo(`Retrying (${attempt}/${max})...`),
       });
       setMessages(prev => [...prev, { role: 'assistant', content: reply }]);
     } catch (e) {
@@ -204,7 +204,7 @@ export default function AIChat({ projectId, projectName }) {
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <span className="material-symbols-outlined" style={{ fontSize: 20, color: T.financial }}>smart_toy</span>
               <span style={{ fontFamily: "'Inter',sans-serif", fontWeight: 700, fontSize: 13, letterSpacing: 1, textTransform: 'uppercase', color: T.text }}>AI Assistant</span>
-              <span style={{ fontSize: 10, color: T.textMuted, fontFamily: "'Inter',sans-serif" }}>MiMo V2</span>
+              <span style={{ fontSize: 10, color: T.textMuted, fontFamily: "'Inter',sans-serif" }}>Gemma 4 Free</span>
             </div>
             <button onClick={() => setOpen(false)} style={{ background: 'none', border: 'none', color: T.textMuted, cursor: 'pointer', fontSize: 18 }}>×</button>
           </div>

@@ -8,7 +8,7 @@ export const PDF_COLORS = {
   black: [0, 0, 0],
 };
 
-export function addKgmHeader(doc, { title, projectName, projectAddress, dateStr }) {
+export function addKgmHeader(doc, { title, projectAddress, dateStr }) {
   const W = doc.internal.pageSize.getWidth();
   const { navy, gold, white } = PDF_COLORS;
   doc.setFillColor(...navy);
@@ -24,7 +24,7 @@ export function addKgmHeader(doc, { title, projectName, projectAddress, dateStr 
   doc.setTextColor(...white);
   doc.setFontSize(14);
   doc.setFont("helvetica", "bold");
-  doc.text("KGM Constructions", 28, 10);
+  doc.text("KGM Homes", 28, 10);
   doc.setFontSize(9);
   doc.setFont("helvetica", "normal");
   doc.setTextColor(...gold);
@@ -37,7 +37,8 @@ export function addKgmHeader(doc, { title, projectName, projectAddress, dateStr 
 }
 
 export function formatPKDate(date = new Date()) {
-  return date.toLocaleDateString("en-PK");
+  // Use en-GB for consistent "DD Mon YYYY" — avoid locale-dependent slash formats
+  return date.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
 }
 
 export function formatDateStrForFilename(dateStr) {
@@ -49,9 +50,19 @@ export function safeFilenamePart(s, { separator = "-" } = {}) {
   if (!str) return "KGM";
   return str
     .replace(/[\s]+/g, separator)
-    .replace(/[^\w\-]+/g, separator)
+    .replace(/[^\w-]+/g, separator)
     .replace(new RegExp(`${separator}+`, "g"), separator)
     .replace(new RegExp(`^${separator}|${separator}$`, "g"), "");
+}
+
+function stripControlChars(value) {
+  return value
+    .split('')
+    .filter((char) => {
+      const code = char.charCodeAt(0);
+      return code === 9 || code === 10 || code === 13 || (code >= 32 && code !== 127);
+    })
+    .join('');
 }
 
 export function addKgmFooter(doc, {
@@ -91,11 +102,9 @@ export function addKgmFooter(doc, {
  */
 export function sanitizeForPdf(text, maxLength = 500) {
   if (!text) return "";
-  let sanitized = String(text)
+  let sanitized = stripControlChars(String(text))
     // Remove HTML tags
     .replace(/<[^>]*>/g, "")
-    // Remove control characters except newlines and tabs
-    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
     // Normalize whitespace
     .replace(/\s+/g, " ")
     .trim();
@@ -107,4 +116,3 @@ export function sanitizeForPdf(text, maxLength = 500) {
 
   return sanitized;
 }
-

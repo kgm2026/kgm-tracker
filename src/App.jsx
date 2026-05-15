@@ -1,46 +1,69 @@
-import { useState, useEffect } from 'react';
-import { jsPDF } from 'jspdf';
-import autoTable from 'jspdf-autotable';
+import { useState, useEffect, Suspense, lazy } from 'react';
 import { ThemeProvider, useTheme } from './context/ThemeContext';
-import { AuthProvider } from './context/AuthContext';
-import { dbGet } from './utils/api';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import { dbGet, dbInsert } from './utils/api';
 import { fmt } from './utils/formatting';
-import Dashboard from './components/Dashboard';
-import Materials from './components/Materials';
-import MaterialSummary from './components/MaterialSummary';
-import Contractors from './components/Contractors';
-import PaymentLog from './components/PaymentLog';
-import SupplierBalances from './components/SupplierBalances';
-import BudgetVsActual from './components/BudgetVsActual';
-import Ledgers from './components/Ledgers';
-import AIChat from './components/AIChat';
-import AIInsights from './components/AIInsights';
-
-import Progress from './components/Progress';
 import { ToastContainer, notify } from './components/Shared';
 import ErrorBoundary from './components/ErrorBoundary';
-import Sidebar, { SIDEBAR_EXPANDED } from './components/Sidebar';
+import Sidebar from './components/Sidebar';
 import Header from './components/Header';
 import MobileNav from './components/MobileNav';
 import GlobalStyles from './components/GlobalStyles';
 import { addKgmFooter, formatPKDate, formatDateStrForFilename, safeFilenamePart, sanitizeForPdf } from './utils/pdfUtils';
+import kgmLogo from './assets/kgm-homes-logo.jpeg';
+
+const Dashboard = lazy(() => import('./components/Dashboard'));
+const Materials = lazy(() => import('./components/Materials'));
+const MaterialSummary = lazy(() => import('./components/MaterialSummary'));
+const Contractors = lazy(() => import('./components/Contractors'));
+const PaymentLog = lazy(() => import('./components/PaymentLog'));
+const SupplierBalances = lazy(() => import('./components/SupplierBalances'));
+const BudgetVsActual = lazy(() => import('./components/BudgetVsActual'));
+const BOQ = lazy(() => import('./components/BOQ'));
+const Ledgers = lazy(() => import('./components/Ledgers'));
+const AIChat = lazy(() => import('./components/AIChat'));
+const AIInsights = lazy(() => import('./components/AIInsights'));
+const Progress = lazy(() => import('./components/Progress'));
 
 function AppContent() {
   const { S, T } = useTheme();
-  const [tab, setTab] = useState("dashboard");
+  const getInitialTab = () => {
+    if (typeof window === "undefined") return "dashboard";
+    const path = window.location.pathname.toLowerCase();
+    if (path === "/boq") return "boq";
+    return "dashboard";
+  };
+  const [tab, setTab] = useState(getInitialTab);
   const [projects, setProjects] = useState([]);
   const [currentProject, setCurrentProject] = useState(null);
+  const [projectsLoading, setProjectsLoading] = useState(true);
 
   useEffect(() => {
+    setProjectsLoading(true);
     dbGet("projects", "&order=created_at.asc").then(data => {
       setProjects(data);
       if (data.length > 0) setCurrentProject(data[0]);
+      setProjectsLoading(false);
+    }).catch(() => {
+      setProjectsLoading(false);
     });
   }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const nextPath = tab === "boq" ? "/boq" : "/";
+    if (window.location.pathname !== nextPath) {
+      window.history.replaceState({}, "", nextPath);
+    }
+  }, [tab]);
 
   const exportPDF = async () => {
     if (!currentProject) return;
     try {
+      const [{ jsPDF }, { default: autoTable }] = await Promise.all([
+        import('jspdf'),
+        import('jspdf-autotable'),
+      ]);
       const entries = await dbGet("material_purchases", `&project_id=eq.${currentProject.id}&order=num.asc`);
       const payments = await dbGet("payment_log", `&project_id=eq.${currentProject.id}&order=created_at.asc`);
       const contractors = await dbGet("contractors", `&project_id=eq.${currentProject.id}`);
@@ -64,7 +87,7 @@ function AppContent() {
       doc.setTextColor(...white);
       doc.setFontSize(14);
       doc.setFont("helvetica", "bold");
-      doc.text("KGM Constructions", 28, 10);
+      doc.text("KGM Homes", 28, 10);
       doc.setFontSize(9);
       doc.setFont("helvetica", "normal");
       doc.setTextColor(...gold);
@@ -77,7 +100,10 @@ function AppContent() {
     };
 
     addHeader(`Project: ${currentProject.name}  ·  Material Purchases`);
-    const totalSpent = entries.reduce((s, e) => s + (e.total || 0), 0);
+    const matTotal = entries.reduce((s, e) => s + (e.total || 0), 0);
+    const contractorPayments = payments.filter(p => !p.payment_type || p.payment_type === "contractor");
+    const totalContractorPayments = contractorPayments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+    const totalSpent = matTotal + totalContractorPayments;
     const totalUnpaid = entries.reduce((s, e) => s + (e.unpaid || 0), 0);
     const paidCount = entries.filter(e => (e.status || "").toLowerCase() === "paid").length;
     const kpis = [
@@ -119,7 +145,7 @@ function AppContent() {
         e.unpaid ? fmt(e.unpaid) : "\u2014",
         sanitizeForPdf(e.status, 50) || "Paid"
       ]),
-      foot: [["", "", "", "", "", "", "TOTAL", fmt(totalSpent), fmt(totalUnpaid), ""]],
+      foot: [["", "", "", "", "", "", "TOTAL", fmt(matTotal), fmt(totalUnpaid), ""]],
       styles: { fontSize: 8, cellPadding: 3, font: "helvetica" },
       headStyles: { fillColor: navy, textColor: white, fontStyle: "bold", fontSize: 7.5 },
       footStyles: { fillColor: navy, textColor: white, fontStyle: "bold", fontSize: 8.5 },
@@ -196,7 +222,7 @@ function AppContent() {
     }
 
     addKgmFooter(doc, {
-      leftText: `KGM Constructions \u00B7 ${currentProject.name} \u00B7 Generated ${dateStr}`,
+      leftText: `KGM Homes \u00B7 ${currentProject.name} \u00B7 Generated ${dateStr}`,
       pageBarHeight: 8,
     });
 
@@ -204,11 +230,40 @@ function AppContent() {
     } catch (e) { notify("PDF export failed: " + e.message, "error"); }
   };
 
-  if (!currentProject) return (
+  const createStarterProject = async () => {
+    try {
+      const row = await dbInsert("projects", {
+        name: "DHA Lahore - Luxury House",
+        address: "DHA Lahore",
+        client: "KGM Homes Client",
+      });
+      setProjects([row]);
+      setCurrentProject(row);
+      notify("Starter project created");
+    } catch (e) {
+      notify("Failed to create project: " + e.message, "error");
+    }
+  };
+
+  if (projectsLoading) return (
     <div style={{ ...S.page, display: "flex", alignItems: "center", justifyContent: "center" }}>
       <div style={{ textAlign: "center" }}>
         <div style={{ width: 40, height: 40, border: `3px solid ${T.cardBorder}`, borderTop: `3px solid ${T.text}`, borderRadius: "50%", animation: "spin 0.8s linear infinite", margin: "0 auto 12px" }} />
         <div style={{ color: T.textMuted }}>Loading projects...</div>
+      </div>
+    </div>
+  );
+
+  if (!currentProject) return (
+    <div style={{ ...S.page, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+      <div style={{ ...S.card, maxWidth: 520, width: "100%", textAlign: "center" }}>
+        <h2 style={{ marginTop: 0, marginBottom: 8, color: T.text }}>No Projects Yet</h2>
+        <p style={{ marginTop: 0, marginBottom: 20, color: T.textMuted }}>
+          Create a project to start tracking materials, budgets, and BOQ.
+        </p>
+        <button style={S.btnGold} onClick={createStarterProject}>
+          Create Starter Project
+        </button>
       </div>
     </div>
   );
@@ -218,7 +273,7 @@ function AppContent() {
       <GlobalStyles />
       <Sidebar tab={tab} setTab={setTab} />
 
-      <div style={{ marginLeft: SIDEBAR_EXPANDED, flex: 1, minHeight: "100vh", display: "flex", flexDirection: "column", transition: "margin-left 0.2s ease" }} className="kgm-main">
+      <div style={{ marginLeft: "var(--kgm-sidebar-width, 256px)", flex: 1, minHeight: "100vh", display: "flex", flexDirection: "column", transition: "margin-left 0.2s ease" }} className="kgm-main">
         <Header
           tab={tab}
           currentProject={currentProject}
@@ -230,23 +285,233 @@ function AppContent() {
         />
 
         <div className="kgm-body" role="tabpanel" id={`panel-${tab}`} style={{ flex: 1, ...S.body }}>
-          {tab === "dashboard" && <Dashboard selectedProject={currentProject.id} onNavigate={setTab} />}
-          {tab === "materials" && <Materials projectId={currentProject.id} />}
-          {tab === "matsummary" && <MaterialSummary projectId={currentProject.id} />}
-          {tab === "contractors" && <Contractors projectId={currentProject.id} />}
-          {tab === "payments" && <PaymentLog projectId={currentProject.id} />}
-          {tab === "suppliers" && <SupplierBalances projectId={currentProject.id} />}
-          {tab === "budget" && <BudgetVsActual projectId={currentProject.id} />}
-          {tab === "ledgers" && <Ledgers projectId={currentProject.id} projectName={currentProject.name} />}
-          {tab === "aiinsights" && <AIInsights projectId={currentProject.id} projectName={currentProject.name} />}
-          {tab === "progress" && <Progress projectId={currentProject.id} projectName={currentProject.name} />}
+          <Suspense fallback={<div style={{ padding: 40, color: T.textMuted, fontFamily: "'Inter',sans-serif" }}>Loading section...</div>}>
+            {tab === "dashboard" && <Dashboard selectedProject={currentProject.id} onNavigate={setTab} />}
+            {tab === "materials" && <Materials projectId={currentProject.id} />}
+            {tab === "matsummary" && <MaterialSummary projectId={currentProject.id} />}
+            {tab === "contractors" && <Contractors projectId={currentProject.id} />}
+            {tab === "payments" && <PaymentLog projectId={currentProject.id} />}
+            {tab === "suppliers" && <SupplierBalances projectId={currentProject.id} />}
+            {tab === "budget" && <BudgetVsActual projectId={currentProject.id} />}
+            {tab === "boq" && <BOQ projectId={currentProject.id} />}
+            {tab === "ledgers" && <Ledgers projectId={currentProject.id} projectName={currentProject.name} />}
+            {tab === "aiinsights" && <AIInsights projectId={currentProject.id} projectName={currentProject.name} />}
+            {tab === "progress" && <Progress projectId={currentProject.id} projectName={currentProject.name} />}
+          </Suspense>
         </div>
       </div>
 
       <MobileNav tab={tab} setTab={setTab} />
-      <AIChat projectId={currentProject.id} projectName={currentProject.name} />
+      <Suspense fallback={null}>
+        <AIChat projectId={currentProject.id} projectName={currentProject.name} />
+      </Suspense>
       <ToastContainer />
     </div>
+  );
+}
+
+function AuthScreen() {
+  const { S, T, toggle, theme } = useTheme();
+  const { login, resetPassword, updatePassword, passwordRecovery, error, isConfigured } = useAuth();
+  const [email, setEmail] = useState((import.meta.env.VITE_ADMIN_EMAIL || "").trim());
+  const [password, setPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [localError, setLocalError] = useState("");
+  const [notice, setNotice] = useState("");
+  const adminEmail = (import.meta.env.VITE_ADMIN_EMAIL || "").trim();
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLocalError("");
+    setNotice("");
+
+    setSubmitting(true);
+    try {
+      if (passwordRecovery) {
+        await updatePassword(newPassword);
+        setNewPassword("");
+        setNotice("Password updated. You can continue into KGM Homes.");
+      } else {
+        await login(email, password);
+        setPassword("");
+      }
+    } catch (err) {
+      setLocalError(err.message || "Login failed");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleResetPassword = async () => {
+    setLocalError("");
+    setNotice("");
+    setSubmitting(true);
+    try {
+      await resetPassword(email);
+      setNotice(`Password reset email sent to ${email || adminEmail}.`);
+    } catch (err) {
+      setLocalError(err.message || "Password reset failed");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div style={{ ...S.page, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+      <GlobalStyles />
+
+      <button
+        onClick={toggle}
+        aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+        style={{
+          position: "fixed",
+          top: 20,
+          right: 20,
+          background: "transparent",
+          border: `1px solid ${T.cardBorder}`,
+          color: T.textMuted,
+          padding: "8px 12px",
+          cursor: "pointer",
+          borderRadius: 6,
+        }}
+      >
+        <span className="material-symbols-outlined" style={{ fontSize: 18 }}>
+          {theme === "dark" ? "light_mode" : "dark_mode"}
+        </span>
+      </button>
+
+      <form
+        onSubmit={handleSubmit}
+        style={{
+          width: "100%",
+          maxWidth: 420,
+          background: T.card,
+          border: `1px solid ${T.cardBorder}`,
+          borderRadius: 16,
+          padding: 28,
+          boxShadow: "0 24px 80px rgba(0,0,0,0.2)",
+        }}
+      >
+        <div style={{ marginBottom: 24 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 18 }}>
+            <img src={kgmLogo} alt="KGM Homes logo" style={{ width: 48, height: 48, borderRadius: 10, objectFit: "cover", border: `1px solid ${T.cardBorder}` }} />
+            <div>
+              <div style={{ fontSize: 12, letterSpacing: 2, textTransform: "uppercase", color: T.textMuted, fontWeight: 600 }}>KGM Homes</div>
+              <div style={{ fontSize: 24, fontWeight: 700, color: T.text }}>Sign In</div>
+            </div>
+          </div>
+          <p style={{ margin: 0, color: T.textMuted, lineHeight: 1.6 }}>
+            {passwordRecovery
+              ? "Choose a new password to finish account recovery."
+              : "Sign in with an approved KGM Homes account."}
+          </p>
+        </div>
+
+        {isConfigured && (
+          <>
+            {!passwordRecovery && (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ ...S.cardLabel, marginBottom: 6 }}>Email</div>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    setLocalError("");
+                    setNotice("");
+                  }}
+                  placeholder={adminEmail || "name@example.com"}
+                  style={S.inp}
+                  autoFocus
+                />
+              </div>
+            )}
+
+            {passwordRecovery ? (
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ ...S.cardLabel, marginBottom: 6 }}>New Password</div>
+                <input
+                  type="password"
+                  value={newPassword}
+                  onChange={(e) => {
+                    setNewPassword(e.target.value);
+                    setLocalError("");
+                  }}
+                  placeholder="At least 8 characters"
+                  style={S.inp}
+                  autoFocus
+                />
+              </div>
+            ) : (
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ ...S.cardLabel, marginBottom: 6 }}>Password</div>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    setLocalError("");
+                  }}
+                  placeholder="Enter password"
+                  style={S.inp}
+                />
+              </div>
+            )}
+
+            <div style={{ marginBottom: 16 }}>
+              {notice && <div style={{ color: T.success || T.financial, fontSize: 13, lineHeight: 1.5 }}>{notice}</div>}
+              {(localError || error) && <div style={{ color: T.danger, fontSize: 13, lineHeight: 1.5 }}>
+                {localError || error}
+              </div>}
+            </div>
+
+            <button
+              type="submit"
+              disabled={submitting}
+              style={{ ...S.btnGold, width: "100%", opacity: submitting ? 0.7 : 1 }}
+            >
+              {submitting ? "Please wait..." : passwordRecovery ? "Update Password" : "Open KGM Homes"}
+            </button>
+
+            {!passwordRecovery && (
+              <button
+                type="button"
+                onClick={handleResetPassword}
+                disabled={submitting}
+                style={{ ...S.btnGhost, width: "100%", marginTop: 10 }}
+              >
+                Forgot password
+              </button>
+            )}
+          </>
+        )}
+      </form>
+    </div>
+  );
+}
+
+function AppShell() {
+  const { isAdmin, isLoading } = useAuth();
+  const { S, T } = useTheme();
+
+  if (isLoading) {
+    return (
+      <div style={{ ...S.page, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ textAlign: "center" }}>
+          <div style={{ width: 40, height: 40, border: `3px solid ${T.cardBorder}`, borderTop: `3px solid ${T.text}`, borderRadius: "50%", animation: "spin 0.8s linear infinite", margin: "0 auto 12px" }} />
+          <div style={{ color: T.textMuted }}>Checking session...</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAdmin) return <AuthScreen />;
+
+  return (
+    <ErrorBoundary>
+      <AppContent />
+    </ErrorBoundary>
   );
 }
 
@@ -254,9 +519,7 @@ export default function App() {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <ErrorBoundary>
-          <AppContent />
-        </ErrorBoundary>
+        <AppShell />
       </AuthProvider>
     </ThemeProvider>
   );

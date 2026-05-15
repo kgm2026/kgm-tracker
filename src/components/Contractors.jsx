@@ -2,10 +2,11 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
 import { dbGet, dbInsert, dbPatch, dbDelete } from '../utils/api';
-import { fmt, STATUS_COLORS, toInt } from '../utils/formatting';
+import { fmt, STATUS_COLORS, toInt, parseDate } from '../utils/formatting';
 import { Overlay, Label, LoadingSpinner, notify } from './Shared';
 import { emitDataChange } from '../utils/aiCacheInvalidation';
 import { useRefreshOnMount } from '../hooks/useRefreshOnMount';
+import ContractorSchedule from './ContractorSchedule';
 
 const BLANK_C = {
   contractor_id: "", name: "", trade: "", contact: "", contract_value: "",
@@ -25,6 +26,7 @@ export default function Contractors({ projectId }) {
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
   const [tradeFilter, setTradeFilter] = useState(null);
+  const [expandedSchedule, setExpandedSchedule] = useState(null); // contractor_id
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -48,15 +50,23 @@ export default function Contractors({ projectId }) {
     return () => window.removeEventListener("kgm-db-changed", handler);
   }, [fetchData]);
 
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.detail?.tab === "contractors") {
+        setForm(BLANK_C);
+        setEditId(null);
+        setModal(true);
+      }
+    };
+    window.addEventListener("kgm-open-new-entry", handler);
+    return () => window.removeEventListener("kgm-open-new-entry", handler);
+  }, []);
+
   const isPaymentLoggedThisMonth = useCallback((name) => {
     const now = new Date();
     return payments.some(p => {
       if ((p.contractor_name || "").toLowerCase() !== (name || "").toLowerCase()) return false;
-      let d;
-      if (p.date && p.date.includes("/")) {
-        const [dd, mm, yyyy] = p.date.split("/");
-        d = new Date(parseInt(yyyy), parseInt(mm) - 1, parseInt(dd));
-      } else { d = new Date(p.date); }
+      const d = parseDate(p.date);
       return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
     });
   }, [payments]);
@@ -170,7 +180,10 @@ export default function Contractors({ projectId }) {
       </section>
 
       {/* Contractors Grid */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 24 }}>
+      <style>{`.contractor-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
+        @media (max-width: 1024px) { .contractor-grid { grid-template-columns: repeat(2, 1fr); } }
+        @media (max-width: 640px) { .contractor-grid { grid-template-columns: 1fr; } }`}</style>
+      <div className="contractor-grid">
         {filtered.map(c => {
           const pct = c.contract_value ? Math.round((c.amount_paid / c.contract_value) * 100) : 0;
           const isSalary = (c.role || "Contractor") === "Salary/Staff";
@@ -229,6 +242,20 @@ export default function Contractors({ projectId }) {
                   {isAdmin && <button onClick={() => del(c)} style={{ fontFamily: "'Inter',sans-serif", fontSize: 11, fontWeight: 500, color: D.error, background: "transparent", border: `1px solid ${D.outline}`, borderRadius: 4, padding: "4px 8px", cursor: "pointer", transition: "all 0.15s" }} onMouseEnter={e => { e.currentTarget.style.borderColor = D.error; e.currentTarget.style.background = `${D.error}10`; }} onMouseLeave={e => { e.currentTarget.style.borderColor = D.outline; e.currentTarget.style.background = "transparent"; }}>Remove</button>}
                 </div>
               </div>
+
+              {/* Payment Schedule toggle */}
+              <button
+                onClick={e => { e.stopPropagation(); setExpandedSchedule(expandedSchedule === c.contractor_id ? null : c.contractor_id); }}
+                style={{ marginTop: 16, width: "100%", background: "transparent", border: `1px solid ${expandedSchedule === c.contractor_id ? T.financial : D.outline}60`, borderRadius: 6, padding: "7px 0", cursor: "pointer", color: expandedSchedule === c.contractor_id ? T.financial : D.muted, fontFamily: "'Inter',sans-serif", fontSize: 11, fontWeight: 600, letterSpacing: 0.5, textTransform: "uppercase", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, transition: "all 0.15s" }}
+              >
+                <span className="material-symbols-outlined" style={{ fontSize: 15 }}>calendar_month</span>
+                Payment Schedule
+                <span className="material-symbols-outlined" style={{ fontSize: 15 }}>{expandedSchedule === c.contractor_id ? 'expand_less' : 'expand_more'}</span>
+              </button>
+
+              {expandedSchedule === c.contractor_id && (
+                <ContractorSchedule contractor={c} projectId={projectId} />
+              )}
             </div>
           );
         })}

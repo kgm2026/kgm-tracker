@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { fmtDate } from '../utils/formatting';
 import { useTheme } from '../context/ThemeContext';
 import { dbGet } from '../utils/api';
 import { LoadingSpinner } from './Shared';
@@ -27,15 +28,7 @@ export default function Progress({ projectId, projectName }) {
     setLoading(false);
   }, [projectId]);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      setLoading(true);
-      const data = await dbGet('progress_entries', `&project_id=eq.${projectId}&order=created_at.desc`);
-      if (!cancelled) { setEntries(data); setLoading(false); }
-    })();
-    return () => { cancelled = true; };
-  }, [projectId]);
+  useEffect(() => { fetchEntries(); }, [fetchEntries]);
 
   useRefreshOnMount(["progress_entries"], fetchEntries);
 
@@ -118,7 +111,7 @@ export default function Progress({ projectId, projectName }) {
                     <div style={{ padding: '16px 20px' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
                         <h4 style={{ fontFamily: "'Inter',sans-serif", fontSize: 14, fontWeight: 600, color: T.text, margin: 0 }}>{entry.title}</h4>
-                        <span style={{ fontSize: 10, color: T.textMuted, fontFamily: "'Inter',sans-serif", whiteSpace: 'nowrap', marginLeft: 12 }}>{entry.created_at ? new Date(entry.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : ''}</span>
+                        <span style={{ fontSize: 10, color: T.textMuted, fontFamily: "'Inter',sans-serif", whiteSpace: 'nowrap', marginLeft: 12 }}>{entry.created_at ? fmtDate(entry.created_at) : ''}</span>
                       </div>
                       {entry.description && <p style={{ color: T.textMuted, fontSize: 12, fontFamily: "'Inter',sans-serif", margin: '0 0 10px', lineHeight: 1.4 }}>{entry.description}</p>}
                       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: isExpanded && analysis ? 16 : 0 }}>

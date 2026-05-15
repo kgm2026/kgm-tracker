@@ -114,7 +114,7 @@ export default function Ledgers({ projectId, projectName }) {
           </div>
         </div>
         <div style={{ flex: 1, overflowY: "auto" }}>
-          {filteredLedgers.map((l, i) => {
+          {filteredLedgers.map((l) => {
             const isActive = selected?.name === l.name && selected?.type === l.type;
             return (
               <div key={l.id} onClick={() => setSelected({ type: l.type, name: l.name })}

@@ -6,7 +6,14 @@ import App from './App';
 vi.mock('./utils/supabaseClient', () => ({
   supabase: {
     auth: {
-      getSession: vi.fn().mockResolvedValue({ data: { session: null } }),
+      getSession: vi.fn().mockResolvedValue({
+        data: {
+          session: {
+            access_token: 'test-jwt',
+            user: { id: 'user-1', email: 'shehryar25@gmail.com' },
+          },
+        },
+      }),
       onAuthStateChange: vi.fn().mockReturnValue({ data: { subscription: { unsubscribe: vi.fn() } } }),
       signInWithPassword: vi.fn(),
       signOut: vi.fn().mockResolvedValue({}),
@@ -62,13 +69,12 @@ describe('App', () => {
     });
   });
 
-  it('mounts all tab panels (hidden tabs stay in DOM)', async () => {
+  it('renders the active tab panel only', async () => {
     render(<App />);
     await waitFor(() => {
       const body = document.querySelector('.kgm-body');
       expect(body).toBeTruthy();
-      // All 11 tab wrappers should be present (display:none tabs stay mounted)
-      expect(body.children.length).toBe(11);
+      expect(body.children.length).toBe(1);
     });
   });
 });

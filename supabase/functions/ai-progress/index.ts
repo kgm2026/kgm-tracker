@@ -1,8 +1,17 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { createClient } from "npm:@supabase/supabase-js@2";
 
+const GOOGLE_API_KEY =
+  Deno.env.get("GOOGLE_API_KEY") ||
+  Deno.env.get("GEMINI_API_KEY");
 const MIMO_API_KEY = Deno.env.get("MIMO_API_KEY");
 const SURL = Deno.env.get("SUPABASE_URL");
 const SKEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || Deno.env.get("SUPABASE_ANON_KEY");
+const ALLOWED_EMAIL = Deno.env.get("ADMIN_EMAIL") || Deno.env.get("ALLOWED_EMAIL");
+const supabaseAuth = createClient(
+  SURL || "",
+  Deno.env.get("SB_PUBLISHABLE_KEY") || Deno.env.get("SUPABASE_ANON_KEY") || "",
+);
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -14,10 +23,13 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS_HEADERS });
 
   try {
+    const auth = await authorizeRequest(req);
+    if (auth.error) return auth.error;
+
     const { action, projectId, title, description, imageBase64, imageType, images } = await req.json();
 
     if (action === "analyze") {
-      return await analyzeProgress({ projectId, title, description, images, imageBase64, imageType });
+      return await analyzeProgress({ projectId, title, description, images, imageBase64, imageType, userToken: auth.token });
     }
     if (action === "drawings") {
       return await analyzeDrawing({ imageBase64, imageType, description });
@@ -35,22 +47,21 @@ Deno.serve(async (req) => {
   }
 });
 
-async function analyzeProgress({ projectId, title, description, images, imageBase64, imageType }) {
-  if (!MIMO_API_KEY) {
-    return new Response(JSON.stringify({ error: "MiMo API key not configured" }), {
+async function analyzeProgress({ projectId, title, description, images, imageBase64, imageType, userToken }) {
+  if (!GOOGLE_API_KEY) {
+    return new Response(JSON.stringify({ error: "AI API key not configured" }), {
       status: 500,
       headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
     });
   }
 
-  // Support both new multi-image and old single-image format
   const imageList = images || (imageBase64 ? [{ base64: imageBase64, type: imageType }] : []);
   const imageCount = imageList.length;
 
   const messages = [
     {
       role: "system",
-      content: `You are a construction site progress analyst for KGM Constructions in Pakistan.
+      content: `You are a construction site progress analyst for KGM Homes in Pakistan.
 Analyze site progress photos/videos and descriptions. Provide:
 1. Work phase identification (foundation, grey structure, plumbing, electrical, finishing, etc.)
 2. Quality assessment (good, needs attention, concerns)
@@ -79,25 +90,14 @@ Respond in JSON format:
     },
   ];
 
-  const response = await fetch("https://api.xiaomimimo.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${MIMO_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: "mimo-v2-omni",
-      messages,
-      temperature: 0.2,
-      max_tokens: 2048,
-      response_format: { type: "json_object" },
-    }),
+  const result = await requestGoogleGemini({
+    messages,
+    temperature: 0.2,
+    max_tokens: 2048,
   });
 
-  const data = await response.json();
-
-  if (!response.ok) {
-    return new Response(JSON.stringify({ error: data.error?.message || "MiMo request failed" }), {
+  if (!result.ok) {
+    return new Response(JSON.stringify({ error: result.error }), {
       status: 500,
       headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
     });
@@ -105,19 +105,18 @@ Respond in JSON format:
 
   let analysis;
   try {
-    analysis = JSON.parse(data.choices[0].message.content);
+    analysis = JSON.parse(result.data.choices[0].message.content);
   } catch {
-    analysis = { summary: data.choices[0].message.content };
+    analysis = { summary: result.data.choices[0].message.content };
   }
 
-  // Save to Supabase
   if (SURL && SKEY) {
     try {
       await fetch(`${SURL}/rest/v1/progress_entries`, {
         method: "POST",
         headers: {
           apikey: SKEY,
-          Authorization: `Bearer ${SKEY}`,
+          Authorization: `Bearer ${userToken}`,
           "Content-Type": "application/json",
           Prefer: "return=representation",
         },
@@ -127,6 +126,9 @@ Respond in JSON format:
           description,
           image_base64: imageList.length > 0 ? `data:${imageList[0].type};base64,${imageList[0].base64}` : null,
           ai_analysis: JSON.stringify(analysis),
+          ai_phase: analysis.phase || "general",
+          ai_quality: analysis.quality || null,
+          ai_progress_pct: analysis.progressPct ?? null,
           phase: analysis.phase || "general",
           status: "in-progress",
         }),
@@ -141,9 +143,107 @@ Respond in JSON format:
   });
 }
 
+async function authorizeRequest(req: Request) {
+  const authHeader = req.headers.get("Authorization") || "";
+  if (!authHeader.startsWith("Bearer ")) {
+    return { error: jsonError("Unauthorized", 401) };
+  }
+
+  if (!SURL || !SKEY) {
+    return { error: jsonError("Supabase auth is not configured", 500) };
+  }
+
+  const token = authHeader.slice("Bearer ".length);
+  const { data, error } = await supabaseAuth.auth.getClaims(token);
+  const email = data?.claims?.email;
+
+  if (error || !email) {
+    return { error: jsonError("Unauthorized", 401) };
+  }
+
+  if (!(await isAllowedAppUser(email, token))) {
+    return { error: jsonError("Forbidden", 403) };
+  }
+
+  return { token, user: data?.claims };
+}
+
+async function isAllowedAppUser(email: string, token: string) {
+  const envEmails = (ALLOWED_EMAIL || "")
+    .split(",")
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
+  if (envEmails.includes(email.toLowerCase())) return true;
+
+  const response = await fetch(`${SURL}/rest/v1/app_user_roles?select=is_active&email=ilike.${encodeURIComponent(email)}&limit=1`, {
+    headers: {
+      apikey: SKEY,
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  if (!response.ok) return false;
+  const rows = await response.json();
+  return Boolean(rows?.[0]?.is_active);
+}
+
+function jsonError(message: string, status: number) {
+  return new Response(JSON.stringify({ error: message }), {
+    status,
+    headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+  });
+}
+
+async function requestGoogleGemini({
+  messages,
+  temperature,
+  max_tokens,
+}: {
+  messages: any[];
+  temperature: number;
+  max_tokens: number;
+}) {
+  const response = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${GOOGLE_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: "gemini-2.5-flash",
+      messages,
+      temperature,
+      max_tokens,
+    }),
+  });
+
+  const data = await response.json();
+  if (!response.ok) {
+    return { ok: false, error: extractAiError(data) };
+  }
+
+  return { ok: true, data: normalizeCompletionData(data) };
+}
+
+function extractAiError(data: any) {
+  return data?.error?.message || data?.error || "AI request failed";
+}
+
+function normalizeCompletionData(data: any) {
+  const content = data?.choices?.[0]?.message?.content;
+  if (typeof content === "string") {
+    data.choices[0].message.content = stripThoughtTags(content);
+  }
+  return data;
+}
+
+function stripThoughtTags(content: string) {
+  const stripped = content.replace(/<thought>[\s\S]*?<\/thought>/gi, "").trim();
+  return stripped || content.trim();
+}
+
 async function analyzeDrawing({ imageBase64, imageType, description }) {
-  if (!MIMO_API_KEY) {
-    return new Response(JSON.stringify({ error: "MiMo API key not configured" }), {
+  if (!GOOGLE_API_KEY) {
+    return new Response(JSON.stringify({ error: "AI API key not configured" }), {
       status: 500,
       headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
     });
@@ -152,7 +252,7 @@ async function analyzeDrawing({ imageBase64, imageType, description }) {
   const messages = [
     {
       role: "system",
-      content: `You are a construction drawing and blueprint analyst for KGM Constructions in Pakistan.
+      content: `You are a construction drawing and blueprint analyst for KGM Homes in Pakistan.
 Analyze architectural drawings, floor plans, structural drawings, or site plans.
 
 Provide:
@@ -179,29 +279,18 @@ Respond in JSON format:
     },
     {
       role: "user",
-      content: buildProgressMessage({ title: "Drawing Analysis", description, imageBase64, imageType }),
+      content: buildMultiImageMessage({ title: "Drawing Analysis", description, images: imageBase64 ? [{ base64: imageBase64, type: imageType }] : [] }),
     },
   ];
 
-  const response = await fetch("https://api.xiaomimimo.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${MIMO_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: "mimo-v2-omni",
-      messages,
-      temperature: 0.2,
-      max_tokens: 2048,
-      response_format: { type: "json_object" },
-    }),
+  const result = await requestGoogleGemini({
+    messages,
+    temperature: 0.2,
+    max_tokens: 2048,
   });
 
-  const data = await response.json();
-
-  if (!response.ok) {
-    return new Response(JSON.stringify({ error: data.error?.message || "MiMo request failed" }), {
+  if (!result.ok) {
+    return new Response(JSON.stringify({ error: result.error }), {
       status: 500,
       headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
     });
@@ -209,9 +298,9 @@ Respond in JSON format:
 
   let analysis;
   try {
-    analysis = JSON.parse(data.choices[0].message.content);
+    analysis = JSON.parse(result.data.choices[0].message.content);
   } catch {
-    analysis = { summary: data.choices[0].message.content };
+    analysis = { summary: result.data.choices[0].message.content };
   }
 
   return new Response(JSON.stringify({ analysis }), {

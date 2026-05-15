@@ -1,4 +1,4 @@
-# KGM Constructions Tracker
+# KGM Homes Tracker
 
 A comprehensive construction project management and expense tracking application built with React.
 
@@ -36,26 +36,20 @@ Create a `.env.local` file:
 ```env
 VITE_SUPABASE_URL=your_supabase_url
 VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
-VITE_ADMIN_PASSWORD=your_admin_password            # Legacy mode only (client-side; not recommended for production)
-VITE_ADMIN_EMAIL=admin@example.com                  # Recommended: enables Supabase Auth admin login (JWT used for RLS)
+VITE_ADMIN_EMAIL=admin@example.com
 ```
 
-## Admin Login
+## Login Setup
 
-Admin Login supports two modes:
+This app now assumes a simple single-user login flow:
 
-1. **Recommended (Supabase Auth)**
-   - Set `VITE_ADMIN_EMAIL`.
-   - Create an admin user in Supabase Auth and configure **RLS policies** so only that user can `INSERT/UPDATE/DELETE` on:
-     - `projects`
-     - `material_purchases`
-     - `contractors`
-     - `payment_log`
-   - The app signs in via Supabase using the typed password and sends the resulting JWT on REST calls.
+1. Set `VITE_ADMIN_EMAIL` to the one email address you want to use.
+2. Create that user in Supabase Auth.
+3. Disable public signups in Supabase Auth so only your account can access the app.
+4. Apply the latest SQL migrations so table/storage access requires authentication.
+5. For edge functions, set `ADMIN_EMAIL` in Supabase function env vars if you want the AI endpoints to enforce the same email server-side.
 
-2. **Legacy (client-side password)**
-   - If `VITE_ADMIN_EMAIL` is not set, the app falls back to comparing the typed password against `VITE_ADMIN_PASSWORD`.
-   - This is convenient for quick demos, but the password is embedded in the frontend bundle, so it should not be considered secure for production.
+After that, the UI starts on a sign-in screen and the app only uses authenticated Supabase requests.
 
 ## Project Structure
 
@@ -88,15 +82,30 @@ src/
 - `contractors` - Contractor information
 - `payment_log` - All payment transactions
 
-## Recent Improvements
+## Security Notes
 
-- Added error boundaries for better error handling
-- Improved responsive design for mobile devices
-- Added accessibility features (ARIA labels, roles)
-- Added Supabase-auth admin login mode (JWT / RLS-ready)
-- Enhanced loading states and spinners
-- Dashboard now uses theme context consistently
+- The frontend uses the Supabase anon key, but data access is expected to be protected by RLS.
+- File uploads now require an authenticated session.
+- AI edge functions should be deployed with:
+  - `GOOGLE_API_KEY` or `GEMINI_API_KEY` for `gemma-4-31b-it`
+  - `MIMO_API_KEY` optional fallback
+  - `SUPABASE_URL`
+  - `SUPABASE_ANON_KEY`
+  - `ADMIN_EMAIL` optional but recommended for single-user enforcement
+
+## Vercel
+
+This is a standard Vite app, so Vercel should use:
+
+- Build command: `npm run build`
+- Output directory: `dist`
+
+Set these environment variables in Vercel:
+
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_ANON_KEY`
+- `VITE_ADMIN_EMAIL`
 
 ## License
 
-Private - KGM Constructions
+Private - KGM Homes

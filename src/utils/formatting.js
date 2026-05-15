@@ -38,15 +38,35 @@ export function suggestCategory(materialName) {
   return null;
 }
 
-export const CHART_COLORS = ["#ffffff", "#cccccc", "#999999", "#666666", "#444444", "#333333"];
 
+/**
+ * Safely parse any date string into a local Date object.
+ * Handles: "YYYY-MM-DD" (Supabase ISO), "DD/MM/YYYY", "MM/DD/YYYY", ISO timestamps.
+ * Never passes bare ISO date strings to `new Date()` to avoid UTC-midnight timezone shift.
+ */
 export function parseDate(d) {
   if (!d) return new Date(0);
-  if (d.includes("/")) {
-    const [dd, mm, yyyy] = d.split("/");
-    return new Date(parseInt(yyyy), parseInt(mm) - 1, parseInt(dd));
-  }
-  return new Date(d);
+  const s = String(d).trim();
+  // "YYYY-MM-DD" or "YYYY-MM-DDTHH:mm..." — split manually to stay in local time
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return new Date(+iso[1], +iso[2] - 1, +iso[3]);
+  // "DD/MM/YYYY"
+  const dmy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (dmy) return new Date(+dmy[3], +dmy[2] - 1, +dmy[1]);
+  // fallback
+  const fb = new Date(s);
+  return isNaN(fb) ? new Date(0) : fb;
+}
+
+/**
+ * Format any date value as "15 Mar 2026" — consistent across UI and PDFs.
+ * Returns "—" for null / invalid.
+ */
+export function fmtDate(d) {
+  if (!d) return "—";
+  const dt = parseDate(d);
+  if (!dt || isNaN(dt)) return "—";
+  return dt.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
 }
 
 export function toInt(v, def = 0) {
@@ -61,15 +81,13 @@ export function toFloat(v, def = 0) {
   return Number.isFinite(n) ? n : def;
 }
 
-export function parseDateInput(d) {
-  // Keep backwards compatibility with the current `parseDate()` formats.
-  return parseDate(d);
-}
 
 export function formatDate(date) {
   if (!date) return "";
-  if (date.includes("/")) return date;
-  const d = new Date(date);
-  if (isNaN(d)) return date;
-  return d.toISOString().split('T')[0];
+  const s = String(date).trim();
+  if (s.includes("/")) return s; // already formatted
+  // Return as YYYY-MM-DD for <input type="date"> compatibility
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  return s;
 }

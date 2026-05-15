@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { useTheme } from '../context/ThemeContext';
+import { parseDate } from '../utils/formatting';
 import { dbGet } from '../utils/api';
 import { fmt, fmtPlain } from '../utils/formatting';
 import { LoadingSpinner, notify } from './Shared';
@@ -65,6 +66,34 @@ export default function SupplierBalances({ projectId }) {
     grandRemaining: suppliers.reduce((s, x) => s + x.unpaid, 0),
   }), [suppliers]);
 
+  const aging = useMemo(() => {
+    const now = new Date();
+    const buckets = { current: 0, mid: 0, old: 0 };
+    for (const p of purchases) {
+      const unpaid = p.unpaid || 0;
+      if (unpaid <= 0) continue;
+      const d = p.date ? parseDate(p.date) : now;
+      const days = Math.max(0, Math.floor((now - d) / 86400000));
+      if (days <= 30) buckets.current += unpaid;
+      else if (days <= 60) buckets.mid += unpaid;
+      else buckets.old += unpaid;
+    }
+    const total = buckets.current + buckets.mid + buckets.old;
+    return {
+      buckets,
+      pcts: {
+        current: total > 0 ? Math.round((buckets.current / total) * 100) : 0,
+        mid: total > 0 ? Math.round((buckets.mid / total) * 100) : 0,
+        old: total > 0 ? Math.round((buckets.old / total) * 100) : 0,
+      },
+    };
+  }, [purchases]);
+
+  const creditUtilPct = useMemo(() => {
+    if (totals.grandTotal <= 0) return 0;
+    return Math.round((totals.grandRemaining / totals.grandTotal) * 100);
+  }, [totals]);
+
   const exportSupplierPDF = (supplierName) => {
     const suppPurchases = purchases.filter(p => (p.supplier || "").trim().toLowerCase() === supplierName.toLowerCase());
     const suppPayments = payments.filter(p => (p.supplier_name || p.contractor_name || "").trim().toLowerCase() === supplierName.toLowerCase());
@@ -76,7 +105,7 @@ export default function SupplierBalances({ projectId }) {
     doc.setFillColor(...black); doc.rect(0, 0, W, 22, "F");
     doc.setFillColor(...white); doc.rect(0, 22, W, 1, "F");
     doc.setTextColor(...white); doc.setFontSize(14); doc.setFont("helvetica", "bold");
-    doc.text("KGM Constructions", 10, 10);
+    doc.text("KGM Homes", 10, 10);
     doc.setFontSize(9); doc.setFont("helvetica", "normal");
     doc.text("Supplier Statement", 10, 17);
     doc.setTextColor(180, 180, 180);
@@ -115,7 +144,7 @@ export default function SupplierBalances({ projectId }) {
       });
     }
     addKgmFooter(doc, {
-      leftText: `KGM Constructions · ${supplierName} · Generated ${dateStr}`,
+      leftText: `KGM Homes · ${supplierName} · Generated ${dateStr}`,
       pageBarHeight: 6,
       barColor: black,
       textColor: [150, 150, 150],
@@ -253,15 +282,17 @@ export default function SupplierBalances({ projectId }) {
       )}
 
       {/* Secondary Metric Bento Grid */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 24, marginTop: 48 }}>
+      <style>{`.supplier-bento { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 24px; margin-top: 48px; }
+        @media (max-width: 768px) { .supplier-bento { grid-template-columns: 1fr; } }`}</style>
+      <div className="supplier-bento">
         {/* Aging Distribution */}
         <div style={{ background: T.card, padding: 24, border: `1px solid ${D.outline}`, borderRadius: 8, boxShadow: "0 1px 3px 0 rgba(0,0,0,0.1)" }}>
           <h5 style={{ fontFamily: "'Inter',sans-serif", fontSize: 13, fontWeight: 600, color: T.text, marginBottom: 20 }}>Aging Distribution</h5>
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             {[
-              { label: "0-30 Days", value: totals.grandPaid, pct: 70, color: T.success },
-              { label: "31-60 Days", value: Math.round(totals.grandRemaining * 0.6), pct: 25, color: T.warning },
-              { label: "60+ Days", value: Math.round(totals.grandRemaining * 0.4), pct: 10, color: T.danger },
+              { label: "0-30 Days", value: aging.buckets.current, pct: aging.pcts.current, color: T.success },
+              { label: "31-60 Days", value: aging.buckets.mid, pct: aging.pcts.mid, color: T.warning },
+              { label: "60+ Days", value: aging.buckets.old, pct: aging.pcts.old, color: T.danger },
             ].map((a, i) => (
               <div key={i}>
                 <div style={{ display: "flex", justifyContent: "space-between", fontFamily: "'Inter',sans-serif", fontSize: 12, marginBottom: 6 }}>
@@ -283,9 +314,9 @@ export default function SupplierBalances({ projectId }) {
             <div style={{ position: "relative", width: 100, height: 100, display: "flex", alignItems: "center", justifyContent: "center" }}>
               <svg style={{ width: "100%", height: "100%", transform: "rotate(-90deg)" }}>
                 <circle cx="50" cy="50" r="44" fill="transparent" stroke={T.bodyBg} strokeWidth="8" />
-                <circle cx="50" cy="50" r="44" fill="transparent" stroke={T.financial} strokeWidth="8" strokeDasharray="276" strokeDashoffset="69" strokeLinecap="round" />
+                <circle cx="50" cy="50" r="44" fill="transparent" stroke={T.financial} strokeWidth="8" strokeDasharray="276" strokeDashoffset={Math.round(276 * (1 - creditUtilPct / 100))} strokeLinecap="round" />
               </svg>
-              <span style={{ position: "absolute", fontFamily: "'Inter',sans-serif", fontSize: 20, fontWeight: 700, color: T.text }}>75%</span>
+              <span style={{ position: "absolute", fontFamily: "'Inter',sans-serif", fontSize: 20, fontWeight: 700, color: T.text }}>{creditUtilPct}%</span>
             </div>
             <div style={{ textAlign: "center", marginTop: 16 }}>
               <span style={{ fontFamily: "'Inter',sans-serif", fontSize: 12, color: D.muted, display: "block" }}>Total Outstanding</span>
@@ -301,7 +332,6 @@ export default function SupplierBalances({ projectId }) {
             <span style={{ fontFamily: "'Inter',sans-serif", fontSize: 32, fontWeight: 700, color: "white", letterSpacing: -1 }}>{fmt(totals.grandRemaining)}</span>
             <p style={{ fontFamily: "'Inter',sans-serif", fontSize: 12, color: "white", opacity: 0.8, marginTop: 8, lineHeight: 1.4 }}>Total outstanding balance that needs to be cleared across all suppliers.</p>
           </div>
-          <button style={{ background: "white", border: "none", color: T.financial, padding: "10px 16px", borderRadius: 6, fontFamily: "'Inter',sans-serif", fontSize: 12, fontWeight: 600, cursor: "pointer", marginTop: 16, transition: "all 0.15s", boxShadow: "0 1px 2px rgba(0,0,0,0.1)" }}>Update Forecast</button>
         </div>
       </div>
     </div>

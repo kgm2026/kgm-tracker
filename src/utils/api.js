@@ -2,6 +2,7 @@ import { cache, makeCacheKey, getCached, setCached, invalidateTable, dispatchToa
 
 export const SURL = import.meta.env.VITE_SUPABASE_URL;
 export const SKEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
+export const AUTH_REQUIRED_MESSAGE = "Please log in to continue.";
 
 let AUTH_TOKEN = null;
 
@@ -11,20 +12,29 @@ export function setAuthToken(token) {
   cache.clear();
 }
 
+export function getAuthToken() {
+  return AUTH_TOKEN;
+}
+
+export function requireAuthToken() {
+  if (!AUTH_TOKEN) throw new Error(AUTH_REQUIRED_MESSAGE);
+  return AUTH_TOKEN;
+}
+
 function normalizeFilters(filters = "") {
   if (!filters) return "";
   return filters.startsWith("&") ? filters : `&${filters}`;
 }
 
-function getHeaders(extra = {}) {
-  return {
+function getHeaders(extra = {}, { requireAuth = false } = {}) {
+  const token = requireAuth ? requireAuthToken() : AUTH_TOKEN;
+  const headers = {
     apikey: SKEY,
-    // For RLS-enabled tables, this should be the user's JWT.
-    // Fallback to anon token to keep existing behavior for unauthenticated reads.
-    Authorization: `Bearer ${AUTH_TOKEN || SKEY}`,
     "Content-Type": "application/json",
     ...extra,
   };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
 }
 
 export async function dbGet(table, filters = "") {
@@ -41,7 +51,9 @@ export async function dbGet(table, filters = "") {
 
   const promise = (async () => {
     try {
-      const r = await fetch(`${SURL}/rest/v1/${table}?select=*${nf}`, { headers: getHeaders() });
+      const r = await fetch(`${SURL}/rest/v1/${table}?select=*${nf}`, {
+        headers: getHeaders({}, { requireAuth: true })
+      });
       if (!r.ok) {
         const j = await r.json().catch(() => null);
         const msg = j?.message || `Fetch failed for ${table} (${r.status})`;
@@ -52,7 +64,11 @@ export async function dbGet(table, filters = "") {
       const data = await r.json();
       setCached(key, data);
       return data;
-    } catch {
+    } catch (error) {
+      if (error?.message === AUTH_REQUIRED_MESSAGE) {
+        dispatchToast(error.message, "error");
+        return [];
+      }
       dispatchToast(`Network error while fetching ${table}`, "error");
       return [];
     }
@@ -65,7 +81,7 @@ export async function dbGet(table, filters = "") {
 export async function dbInsert(table, data) {
   const r = await fetch(`${SURL}/rest/v1/${table}`, {
     method: "POST",
-    headers: { ...getHeaders(), Prefer: "return=representation" },
+    headers: { ...getHeaders({}, { requireAuth: true }), Prefer: "return=representation" },
     body: JSON.stringify(data)
   });
   if (!r.ok) {
@@ -78,7 +94,10 @@ export async function dbInsert(table, data) {
 }
 
 export async function dbDelete(table, id) {
-  const r = await fetch(`${SURL}/rest/v1/${table}?id=eq.${id}`, { method: "DELETE", headers: getHeaders() });
+  const r = await fetch(`${SURL}/rest/v1/${table}?id=eq.${id}`, {
+    method: "DELETE",
+    headers: getHeaders({}, { requireAuth: true })
+  });
   if (!r.ok) {
     const j = await r.json().catch(() => ({}));
     throw new Error(j.message || `Delete failed: ${r.status}`);
@@ -89,7 +108,7 @@ export async function dbDelete(table, id) {
 export async function dbPatch(table, id, data) {
   const r = await fetch(`${SURL}/rest/v1/${table}?id=eq.${id}`, {
     method: "PATCH",
-    headers: getHeaders(),
+    headers: getHeaders({}, { requireAuth: true }),
     body: JSON.stringify(data)
   });
   if (!r.ok) {
